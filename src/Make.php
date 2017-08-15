@@ -83,6 +83,10 @@ class Make extends BaseMake
     /**
      * @var DOMElement
      */
+    private $infANTT;
+    /**
+     * @var DOMElement
+     */
     private $veicTracao;
     /**
      * @var DOMElement
@@ -104,9 +108,11 @@ class Make extends BaseMake
     private $aInfCTe = array(); //array de DOMNode
     private $aInfNFe = array(); //array de DOMNode
     private $aInfMDFe = array(); //array de DOMNode
+    private $seg = array(); //array de DOMNode
     private $aLacres = array(); //array de DOMNode
     private $aAutXML = array(); //array de DOMNode
     private $aCondutor = array(); //array de DOMNode
+    private $aInfContratante = array(); //array de DOMNode
     private $aReboque = array(); //array de DOMNode
     private $aDisp = array(); //array de DOMNode
     private $aVag = array(); //array de DOMNode
@@ -136,12 +142,14 @@ class Make extends BaseMake
         $this->dom->appChild($this->infMDFe, $this->emit, 'Falta tag "infMDFe"');
         //tag infModal [41]
         $this->zTagRodo();
+        $this->zTagInfContratante();
         $this->zTagAereo();
         $this->zTagFerrov();
         $this->zTagAqua();
         $this->dom->appChild($this->infMDFe, $this->infModal, 'Falta tag "infMDFe"');
         //tag indDoc [44]
         $this->zTagInfDoc();
+        $this->zTagSeg();
         //tag tot [68]
         $this->dom->appChild($this->infMDFe, $this->tot, 'Falta tag "infMDFe"');
         //tag lacres [76]
@@ -691,6 +699,43 @@ class Make extends BaseMake
     }
 
     /**
+     * Gera as tags para o elemento: "seg" (Informações de Seguro da Carga)
+     * #360
+     * Nível: 1
+     * @param int $respSeg
+     * @param string $xSeg
+     * @param string $nApol
+     * @param string $nAver
+     * @param string $CNPJ 
+     * @param string $CPF
+     * @param string $SegCNPJ 
+     * @return mixed
+     */
+    public function segTag($respSeg = 1, $xSeg = '', $nApol = '', $nAver = '', $CNPJ = '', $CPF = '', $SegCNPJ = '')
+    {
+        $identificador = '#360 <seg> - ';
+        $this->seg[] = $this->dom->createElement('seg');
+        $infResp = $this->dom->createElement('infResp');
+        $posicao = (integer)count($this->seg) - 1;
+
+        $this->dom->addChild($infResp, 'respSeg', $respSeg, false, $identificador . 'Responsável pelo Seguro');
+        $this->dom->addChild($infResp, 'CNPJ',    $CNPJ,    false, $identificador . 'Número do CNPJ do responsável pelo seguro');
+        $this->dom->addChild($infResp, 'CPF',     $CPF,     false, $identificador . 'Número do CPF do responsável pelo seguro ');
+        $this->dom->appChild($this->seg[$posicao], $infResp, '');
+        
+        $infSeg = $this->dom->createElement('infSeg');
+        
+        $this->dom->addChild($infSeg, 'xSeg',    $xSeg,    false, $identificador . 'Nome da Seguradora');
+        $this->dom->addChild($infSeg, 'CNPJ',    $SegCNPJ, true, $identificador . 'Número do CNPJ da seguradora');
+        $this->dom->appChild($this->seg[$posicao], $infSeg, '');
+        $this->dom->addChild($this->seg[$posicao], 'nApol',   $nApol,   false, $identificador . 'Número da Apólice');
+        $this->dom->addChild($this->seg[$posicao], 'nAver',   $nAver,   false, $identificador . 'Número da Averbação');
+        
+        
+        return $this->seg[$posicao];
+    }
+    
+    /**
      * tagTot
      * tag MDFe/infMDFe/tot
      *
@@ -1177,13 +1222,16 @@ class Make extends BaseMake
         $ciot = ''
     ) {
         $rodo = $this->dom->createElement("rodo");
+        $infANTT = $this->dom->createElement("infANTT");
         $this->dom->addChild(
-            $rodo,
+            $infANTT,
             "RNTRC",
             $rntrc,
-            false,
+            true,
             "Registro Nacional de Transportadores Rodoviários de Carga"
         );
+        $this->dom->appChild($rodo, $infANTT, '');
+        
         $this->dom->addChild(
             $rodo,
             "CIOT",
@@ -1192,6 +1240,7 @@ class Make extends BaseMake
             "Código Identificador da Operação de Transporte"
         );
         $this->rodo = $rodo;
+        $this->infANTT = $infANTT;
         return $rodo;
     }
 
@@ -1264,6 +1313,36 @@ class Make extends BaseMake
         );
         $this->aCondutor[] = $condutor;
         return $condutor;
+    }
+
+    /**
+     * tagInfContratante
+     *
+     * @param  string $cnpf
+     * @param  string $cpf
+     * @return DOMElement
+     */
+    public function tagInfContratante(
+        $cnpf = '',
+        $cpf = ''
+    ) {
+        $infContratante = $this->dom->createElement("infContratante");
+        $this->dom->addChild(
+            $infContratante,
+            "CNPJ",
+            $cnpf,
+            false,
+            "Número do CNPJ do contratante do serviço"
+        );
+        $this->dom->addChild(
+            $infContratante,
+            "CPF",
+            $cpf,
+            false,
+            "Número do CPF do contratente do serviço"
+        );
+        $this->aInfContratante[] = $infContratante;
+        return $infContratante;
     }
 
     /**
@@ -1469,6 +1548,14 @@ class Make extends BaseMake
     {
         $this->dom->addArrayChild($this->infMDFe, $this->aLacres);
     }
+    
+    /**
+     * zTagInfContratante
+     */
+    protected function zTagInfContratante()
+    {
+        $this->dom->addArrayChild($this->infANTT, $this->aInfContratante);
+    }
 
     /**
      * Proecessa documentos fiscais
@@ -1504,6 +1591,16 @@ class Make extends BaseMake
         }
         if ($this->aCountDoc['MDFe'] > 0) {
             $this->tot->getElementsByTagName('qMDFe')->item(0)->nodeValue = $this->aCountDoc['MDFe'];
+        }
+    }
+
+    /**
+     * Proecessa tag seg
+     */
+    protected function zTagSeg()
+    {
+        foreach ($this->seg as $seg) {
+            $this->dom->appChild($this->infMDFe, $seg, 'Falta tag "seg"');
         }
     }
 

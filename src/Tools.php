@@ -130,7 +130,7 @@ class Tools extends BaseTools
         }
         //carrega o protocolo
         $docprot = new Dom();
-        if (file_exists($pathMDFefile)) {
+        if (file_exists($pathProtfile)) {
             //carrega o XML pelo caminho do arquivo informado
             $docprot->loadXMLFile($pathProtfile);
         } else {
@@ -217,6 +217,96 @@ class Tools extends BaseTools
     }
 
     /**
+     * addEncerramento
+     * Adiciona a tga de encerramento a uma MDFe já autorizado
+     * NOTA: não é requisito da SEFAZ, mas auxilia na identificação dos MDFe que foram encerrados
+     *
+     * @param  string $pathMDFefile
+     * @param  string $pathEncfile
+     * @param  bool   $saveFile
+     * @return string
+     * @throws Exception\RuntimeException
+     */
+    public function addEncerramento($pathMDFefile = '', $pathEncfile = '', $saveFile = false)
+    {
+        $procXML = '';
+        //carrega a MDFe
+        $docmdfe = new Dom();
+        if (file_exists($pathMDFefile)) {
+            //carrega o XML pelo caminho do arquivo informado
+            $docmdfe->loadXMLFile($pathMDFefile);
+        } else {
+            //carrega o XML pelo conteúdo
+            $docmdfe->loadXMLString($pathMDFefile);
+        }
+        $nodemdfe = $docmdfe->getNode('MDFe', 0);
+        if ($nodemdfe == '') {
+            $msg = "O arquivo indicado como MDFe não é um xml de MDFe!";
+            throw new Exception\RuntimeException($msg);
+        }
+        $proMDFe = $docmdfe->getNode('protMDFe');
+        if ($proMDFe == '') {
+            $msg = "O MDFe não está protocolado ainda!!";
+            throw new Exception\RuntimeException($msg);
+        }
+        $chaveMDFe = $proMDFe->getElementsByTagName('chMDFe')->item(0)->nodeValue;
+        //$nProtMDFe = $proMDFe->getElementsByTagName('nProt')->item(0)->nodeValue;
+        $tpAmb = $docmdfe->getNodeValue('tpAmb');
+        $anomes = date(
+            'Ym',
+            DateTime::convertSefazTimeToTimestamp($docmdfe->getNodeValue('dhEmi'))
+        );
+        //carrega o encerramento
+        //pode ser um evento ou resultado de uma consulta com multiplos eventos
+        $docEnce = new Dom();
+        if (file_exists($pathEncfile)) {
+            //carrega o XML pelo caminho do arquivo informado
+            $docEnce->loadXMLFile($pathEncfile);
+        } else {
+            //carrega o XML pelo conteúdo
+            $docEnce->loadXMLString($pathEncfile);
+        }
+        $retEvento = $docEnce->getElementsByTagName('retEventoMDFe')->item(0);
+        $eventos = $retEvento->getElementsByTagName('infEvento');
+        foreach ($eventos as $evento) {
+            //evento
+            $cStat = $evento->getElementsByTagName('cStat')->item(0)->nodeValue;
+            $tpAmb = $evento->getElementsByTagName('tpAmb')->item(0)->nodeValue;
+            $chaveEvento = $evento->getElementsByTagName('chMDFe')->item(0)->nodeValue;
+            $tpEvento = $evento->getElementsByTagName('tpEvento')->item(0)->nodeValue;
+            //$nProtEvento = $evento->getElementsByTagName('nProt')->item(0)->nodeValue;
+            //verifica se conferem os dados
+            //cStat = 135 ==> evento homologado
+            //tpEvento = 110112 ==> Encerramento
+            //chave do evento == chave da NFe
+            //protocolo do evento ==  protocolo da NFe
+            if ($cStat == '135'
+                && $tpEvento == '110112'
+                && $chaveEvento == $chaveMDFe
+            ) {
+                $docmdfe->getElementsByTagName('cStat')->item(0)->nodeValue = '132';
+                $docmdfe->getElementsByTagName('xMotivo')->item(0)->nodeValue = 'Encerramento de MDF-e homologado';
+                $procXML = $docmdfe->saveXML();
+                //remove as informações indesejadas
+                $procXML = Strings::clearProt($procXML);
+                if ($saveFile) {
+                    $filename = "$chaveMDFe-protMDFe.xml";
+                    $this->zGravaFile(
+                        'mdfe',
+                        $tpAmb,
+                        $filename,
+                        $procXML,
+                        'encerradas',
+                        $anomes
+                    );
+                }
+                break;
+            }
+        }
+        return (string) $procXML;
+    }
+
+    /**
      * addCancelamento
      * Adiciona a tga de cancelamento a uma MDFe já autorizada
      * NOTA: não é requisito da SEFAZ, mas auxilia na identificação das MDFe que foram canceladas
@@ -296,7 +386,7 @@ class Tools extends BaseTools
                         $tpAmb,
                         $filename,
                         $procXML,
-                        'enviadas'.DIRECTORY_SEPARATOR.'aprovadas',
+                        'canceladas',
                         $anomes
                     );
                 }
@@ -864,7 +954,7 @@ class Tools extends BaseTools
         $aRet = $this->zTpEv($tpEvento);
         $aliasEvento = $aRet['alias'];
         $cnpj = $this->aConfig['cnpj'];
-        $dhEvento = (string) str_replace(' ', 'T', date('Y-m-d H:i:s'));
+        $dhEvento = (string) str_replace(' ', 'T', date('Y-m-d H:i:sP'));
         $sSeqEvento = str_pad($nSeqEvento, 2, "0", STR_PAD_LEFT);
         $eventId = "ID".$tpEvento.$chave.$sSeqEvento;
         if ($cOrgao == '') {
@@ -977,8 +1067,56 @@ class Tools extends BaseTools
         }
         if (! ValidXsd::validar($aResp['xml'], $xsdPath)) {
             $this->errors[] = ValidXsd::$errors;
+        }
+        if($aResp['Id'] === 'mdfe'){
+            $this->validarXmlModal($aResp);
+        }
+        if(count($this->errors) > 0){
             return false;
         }
         return true;
+    }
+    /**
+     * validarXmlModal
+     * Valida o modal do MDFe com seu xsd
+     * Salva na variavel $this->errors os erros que encontrar
+     *
+     * @param  array $aResp retorno da identificação do evento e conteudo do xml
+     * @return 
+     */
+    protected function validarXmlModal($aResp)
+    {
+        $tmp_nome_modal = $aResp['dom']->getElementsByTagName('modal')->item(0);
+        if(!empty($tmp_nome_modal)){
+            $modal = (int)$tmp_nome_modal->nodeValue;
+            if($modal === 1)    {$nome_modal='Rodoviario'; $tmp_tag='rodo';}
+            elseif($modal === 2){$nome_modal='Aereo'; $tmp_tag='aereo';}
+            elseif($modal === 3){$nome_modal='Aquaviario'; $tmp_tag='aquav';}
+            elseif($modal === 4){$nome_modal='Ferroviario'; $tmp_tag='ferrov';}
+            else{$nome_modal='';}
+        }else{
+            $nome_modal='';
+        }
+        $xsdFile_modal= $this->rootDir.DIRECTORY_SEPARATOR . 'schemes' . DIRECTORY_SEPARATOR .
+        $this->aConfig['schemesMDFe']. DIRECTORY_SEPARATOR . $aResp['Id']."Modal".$nome_modal.'_v'.$aResp['versao'].'.xsd';
+
+        if(!is_file($xsdFile_modal)){
+            $this->errors[] = "Erro na localização do schema xsd para o modal $nome_modal.\n";
+            return false;
+        }
+        $tmp_modal=$aResp['dom']->getElementsByTagName('infModal')->item(0);
+        if ( !empty($tmp_modal) ) {
+            $tmp_modal2=$tmp_modal->getElementsByTagName($tmp_tag)->item(0);
+
+            $dom = new \DOMDocument('1.0', 'utf-8');
+            $dom->formatOutput = true;
+            $dom->preserveWhiteSpace = false;
+            $tmp_modal2=$dom->importNode( $tmp_modal2 ,true);
+            $dom->appendChild($tmp_modal2);
+
+            if (! ValidXsd::validar($dom->saveXML(), $xsdFile_modal)) {
+                $this->errors[] = ValidXsd::$errors;
+            }
+        }
     }
 }
